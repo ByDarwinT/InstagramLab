@@ -1,0 +1,21 @@
+# Credenciales y datos de sesión (nunca versionar)
+.env
+.env.*
+!.env.example
+cookies.json
+*session*.json
+
+# Resultados y archivos generados
+output/
+*.log
+
+# Entornos, cachés y archivos locales
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+Thumbs.db

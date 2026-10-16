@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InstagramLab | Panel de extracción</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><main class="layout"><div class="eyebrow">PROYECTO UNIVERSITARIO · PLAYWRIGHT</div><h1>Instagram<span>Lab</span></h1>
+<p class="lead">Analiza los datos visibles de un perfil y guarda sus publicaciones en JSON.</p>
+<section class="panel"><h2>Nueva extracción</h2><form id="jobForm"><label for="profile">Perfil de Instagram</label>
+<input id="profile" placeholder="@usuario o https://www.instagram.com/usuario/" required autocomplete="off">
+<label for="posts">Número máximo de publicaciones</label><input id="posts" type="number" min="1" max="100" value="2" required>
+<button id="submit" type="submit">Iniciar extracción →</button></form></section>
+<section class="panel"><div class="status"><h2>Actividad</h2><span id="badge">Sin ejecutar</span></div>
+<ul id="events"><li>Configura un perfil para comenzar.</li></ul><p id="error" role="alert"></p><a id="download" hidden>Descargar JSON ↓</a></section>
+<footer>Información visible según los permisos de tu sesión. Uso académico responsable.</footer></main>
+<script src="/static/app.js"></script></body></html>
