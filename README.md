@@ -73,4 +73,4 @@ Considero que el mayor avance fue pasar de un programa que recopilaba enlaces a 
 - [Documentación de Playwright para Python](https://playwright.dev/python/)
 - [Documentación de Flask](https://flask.palletsprojects.com/)
 - [Documentación de Python](https://docs.python.org/3/)
-- Repositorios y ejemplos públicos de GitHub consultados durante el desarrollo (agregar enlaces y atribuciones aplicables antes de publicar).
+
