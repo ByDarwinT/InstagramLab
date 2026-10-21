@@ -271,8 +271,6 @@ def _profile_photo(page, header, username: str):
     for i in range(min(candidates.count(), 20)):
         img = candidates.nth(i)
         alt = (img.get_attribute("alt") or "").lower()
-        parent = img.locator("xpath=..").first
-        parent_href = parent.get_attribute("href") or ""
         if ("profile picture" in alt or "foto del perfil" in alt or
             "foto de perfil" in alt or "imagen del perfil" in alt or
             username.lower() in alt or "profile_pic" in (img.get_attribute("src") or "")):

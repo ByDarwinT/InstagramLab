@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
-from .config import PRIMARY_USER, PRIMARY_PASS, RESULTS_DIR
-from .auth import initialize_auth, refresh_auth_if_needed
+from .config import RESULTS_DIR
+from .auth import load_verified_cookies, verify_on_home
 from .scraper import extract_profile_data, collect_post_urls, extract_post_data
 from .utils import random_pause
 
@@ -29,20 +29,21 @@ def normalize_profile(raw: str) -> str:
 
 def run_scrape(target: str, max_posts: int = 2, progress=None) -> Path:
     """Ejecuta una sesión completa y devuelve la ruta del JSON generado."""
-    if not PRIMARY_USER or not PRIMARY_PASS:
-        raise RuntimeError('Configura INSTAGRAM_USERNAME e INSTAGRAM_PASSWORD en .env')
     url = normalize_profile(target)
     count = int(max_posts)
     if not 1 <= count <= 100:
         raise ValueError('La cantidad debe estar entre 1 y 100')
     emit = progress or (lambda message: print(message))
     with sync_playwright() as playwright:
+        # Chromium aislado: solo restaura cookies; el login es un proceso separado.
         browser = playwright.chromium.launch(headless=False)
+        context = browser.new_context(
+            viewport={'width': 1280, 'height': 800}, locale='es-ES'
+        )
+        page = context.new_page()
         try:
-            context = browser.new_context(viewport={'width': 1280, 'height': 800}, locale='es-ES')
-            page = context.new_page()
-            emit('Iniciando sesión…')
-            initialize_auth(page, context)
+            emit("Comprobando cookies guardadas…")
+            load_verified_cookies(page, context)
             emit('Leyendo los datos del perfil…')
             profile = extract_profile_data(page, url)
             emit('Buscando publicaciones…')
@@ -50,7 +51,8 @@ def run_scrape(target: str, max_posts: int = 2, progress=None) -> Path:
             posts = []
             for index, post_url in enumerate(urls, 1):
                 if index % 20 == 0:
-                    refresh_auth_if_needed(page, context)
+                    if not verify_on_home(page, context):
+                        raise RuntimeError('La sesión guardada dejó de estar disponible.')
                 emit(f'Extrayendo publicación {index} de {len(urls)}…')
                 post = extract_post_data(page, post_url, index)
                 if post is not None:

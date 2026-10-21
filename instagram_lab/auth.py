@@ -1,153 +1,69 @@
-import json
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+"""Autenticación manual independiente del scraping.
 
-from .config import PRIMARY_USER, PRIMARY_PASS, BACKUP_USER, BACKUP_PASS, SESSION_FILE, RESULTS_DIR
-from .utils import random_pause
+Las cookies son secretas: solo se guardan localmente y jamás se devuelven a la web.
+"""
+import json
+from .config import SESSION_FILE
+
+HOME = 'https://www.instagram.com/'
+LOGIN = HOME + 'accounts/login/'
+# Indicadores positivos: un formulario ausente no prueba autenticación.
+AUTH_UI = ('a[href*="/direct/inbox"], a[href*="/explore/"], '
+           'a[href*="/accounts/edit"], svg[aria-label="Inicio"], '
+           'svg[aria-label="Home"]')
 
 
 def persist_session(context):
+    """Guarda de forma atómica cookies de una sesión previamente verificada."""
     cookies = context.cookies()
-    SESSION_FILE.write_text(json.dumps(cookies, indent=2))
-    print("✅ Cookies guardadas.")
+    if not any(c.get('name') == 'sessionid' and c.get('value') for c in cookies):
+        raise RuntimeError('Instagram no entregó una cookie de sesión válida.')
+    SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = SESSION_FILE.with_name('cookies.json.tmp')
+    tmp.write_text(json.dumps(cookies, ensure_ascii=False, indent=2), encoding='utf-8')
+    tmp.replace(SESSION_FILE)
 
 
 def restore_session(context):
-    if SESSION_FILE.exists():
-        cookies = json.loads(SESSION_FILE.read_text())
-        context.add_cookies(cookies)
-        print("🍪 Cookies cargadas desde archivo.")
-        return True
-    return False
-
-
-def check_session_alive(page) -> bool:
-    """Visita Instagram y verifica si la sesión sigue activa."""
+    """Inyecta cookies desde el archivo sin gestionar el inicio de sesión."""
+    if not SESSION_FILE.exists():
+        return False
     try:
-        page.goto("https://www.instagram.com/", timeout=20000)
-        random_pause(2, 4)
-        if page.locator('input[name="username"]').is_visible(timeout=4000):
-            print("⚠️  Sesión expirada.")
+        cookies = json.loads(SESSION_FILE.read_text(encoding='utf-8'))
+        if not isinstance(cookies, list) or not cookies:
             return False
-        print("✅ Sesión activa.")
+        context.add_cookies(cookies)
         return True
-    except PlaywrightTimeoutError:
+    except (OSError, ValueError, TypeError) as exc:
+        print(f'No se pudieron restaurar cookies: {exc}')
         return False
 
 
-def detect_account_blocked(page) -> bool:
-    """Detecta si la cuenta actual está bloqueada o suspendida por Instagram."""
-    blocked_signals = [
-        'text="We suspended your account"',
-        'text="Tu cuenta fue suspendida"',
-        'text="ve suspended your account"',
-        'text="Hemos suspendido tu cuenta"',
-        'text="Your account has been disabled"',
-        'text="Tu cuenta fue desactivada"',
-    ]
-    for selector in blocked_signals:
-        try:
-            if page.locator(selector).is_visible(timeout=2000):
-                print("🚫 Cuenta bloqueada/suspendida detectada.")
-                return True
-        except Exception:
-            pass
-
-    if "challenge" in page.url or "suspended" in page.url:
-        print("🚫 Redirección a página de bloqueo detectada.")
-        return True
-
-    return False
-
-
-def perform_login(page, context, username: str, password: str):
-    """Realiza el login con las credenciales indicadas y guarda las cookies."""
-    print(f"🔐 Iniciando sesión con: {username}")
-    page.goto("https://www.instagram.com/accounts/login/", timeout=30000)
-    random_pause(3, 5)
-
+def verified_session(page, context):
+    """Comprueba una sesión mediante cookie y señales de UI autenticada."""
+    if any(x in page.url.lower() for x in ('/accounts/login', '/challenge', '/two_factor', '/checkpoint', '/suspended')):
+        return False
+    if not any(c.get('name') == 'sessionid' and c.get('value') for c in context.cookies()):
+        return False
     try:
-        print("✍️ Escribiendo credenciales...")
-        username_input = page.locator('input[type="text"], input[name="username"]').first
-        username_input.fill(username)
-        random_pause(1, 2)
-
-        password_input = page.locator('input[type="password"], input[name="password"]').first
-        password_input.fill(password)
-        random_pause(1, 2)
-
-        print("🖱️ Presionando Enter para enviar el formulario...")
-        password_input.press("Enter")
-        random_pause(5, 8)
-
-    except Exception as e:
-        print(f"❌ Error llenando el formulario: {e}")
-        page.screenshot(path=RESULTS_DIR / "error_formulario.png")
-        raise RuntimeError("Los selectores del formulario fallaron. Revisa la captura.")
-
-    try:
-        not_now = page.locator("text=Ahora no, text=Not Now").first
-        if not_now.is_visible(timeout=4000):
-            not_now.click()
-            random_pause(1, 2)
+        return page.locator(AUTH_UI).first.is_visible(timeout=2000)
     except Exception:
-        pass
+        return False
 
+
+def verify_on_home(page, context):
+    """Comprueba de forma activa la sesión en la página principal."""
     try:
-        not_now2 = page.locator("text=Ahora no, text=Not Now").first
-        if not_now2.is_visible(timeout=4000):
-            not_now2.click()
-            random_pause(1, 2)
+        page.goto(HOME, wait_until='domcontentloaded', timeout=30000)
+        page.wait_for_timeout(1800)
+        return verified_session(page, context)
     except Exception:
-        pass
-
-    if "login" in page.url:
-        raise RuntimeError(f"❌ Login fallido para {username}. Meta rechazó las credenciales.")
-
-    persist_session(context)
-    print(f"✅ Login exitoso con: {username}")
+        return False
 
 
-def _switch_to_backup_account(page, context):
-    """Limpia la sesión actual e inicia sesión con la cuenta de respaldo."""
-    if not BACKUP_USER or not BACKUP_PASS:
-        raise RuntimeError(
-            "❌ La cuenta principal está bloqueada y no hay credenciales de respaldo definidas.\n"
-            "   Añade INSTAGRAM_USERNAME_BACKUP y INSTAGRAM_PASSWORD_BACKUP en tu archivo .env"
-        )
-    SESSION_FILE.unlink(missing_ok=True)
-    context.clear_cookies()
-    perform_login(page, context, BACKUP_USER, BACKUP_PASS)
-
-
-def initialize_auth(page, context):
-    """
-    Carga cookies o hace login con la cuenta principal.
-    Si la cuenta principal está bloqueada, usa la cuenta de respaldo.
-    """
-    loaded = restore_session(context)
-    if loaded and check_session_alive(page):
-        if detect_account_blocked(page):
-            print("🔄 Cambiando a cuenta de respaldo...")
-            _switch_to_backup_account(page, context)
-        return
-
-    SESSION_FILE.unlink(missing_ok=True)
-
-    try:
-        perform_login(page, context, PRIMARY_USER, PRIMARY_PASS)
-        random_pause(2, 4)
-        if detect_account_blocked(page):
-            print("🔄 Cuenta principal bloqueada. Cambiando a cuenta de respaldo...")
-            _switch_to_backup_account(page, context)
-    except RuntimeError:
-        print("⚠️ Login principal falló. Intentando con cuenta de respaldo...")
-        _switch_to_backup_account(page, context)
-
-
-def refresh_auth_if_needed(page, context):
-    """Re-verifica la sesión y cambia de cuenta si está bloqueada."""
-    if not check_session_alive(page):
-        perform_login(page, context, PRIMARY_USER, PRIMARY_PASS)
-    elif detect_account_blocked(page):
-        print("🔄 Cuenta bloqueada durante el scraping. Cambiando a respaldo...")
-        _switch_to_backup_account(page, context)
+def load_verified_cookies(page, context):
+    """Verifica cookies del disco; nunca inicia sesión ni pide contraseñas."""
+    if not restore_session(context):
+        raise RuntimeError('No existe cookies.json válido. Usa primero «Cargar cookies» en el panel web.')
+    if not verify_on_home(page, context):
+        raise RuntimeError('Las cookies han caducado o Instagram pide verificación. Usa «Cargar cookies» otra vez.')
